@@ -1,10 +1,49 @@
-// @description Sends custom and animated emojis as links, and renders fake emojis, stickers, and GIFs as real ones
-// @version 0.4.3
+// @description Unlocks Nitro stream quality, sends custom emojis and stickers as links, and renders fake emojis, stickers, and GIFs as real ones
+// @version 0.5.0
 // @author mantikafasi
 
 const { gateway } = phoenix;
 
+let removeStreamUnlock: Phoenix.Remover | null = null;
+
+const syncStreamUnlock = (enabled: boolean) => {
+  if (enabled) {
+    if (!removeStreamUnlock && phoenix.stream?.unlockQuality) {
+      removeStreamUnlock = phoenix.stream.unlockQuality();
+    }
+  } else if (removeStreamUnlock) {
+    removeStreamUnlock();
+    removeStreamUnlock = null;
+  }
+};
+
 const settings = phoenix.settings.define({
+  enableStreamQualityBypass: {
+    type: "switch",
+    title: "Unlock Nitro stream quality",
+    description: "Allow streaming in 1080p, 1440p, Source, and 60 FPS without Nitro (Desktop)",
+    default: true,
+    onChange(enabled) {
+      syncStreamUnlock(enabled);
+    },
+  },
+  enableStickerBypass: {
+    type: "switch",
+    title: "Bypass sticker restrictions",
+    description: "Send external stickers as links when you don't have Nitro",
+    default: true,
+  },
+  stickerSize: {
+    type: "select",
+    title: "Sticker size",
+    options: [
+      { value: "160" },
+      { value: "128" },
+      { value: "96" },
+      { value: "64" },
+      { value: "320" },
+    ],
+  },
   emojiSize: {
     type: "select",
     title: "Emoji size",
@@ -26,7 +65,7 @@ const settings = phoenix.settings.define({
   hyperLinkText: {
     type: "text",
     title: "Link text",
-    description: "{{NAME}} is replaced with the emoji's name",
+    description: "{{NAME}} is replaced with the emoji or sticker name",
     default: "{{NAME}}",
   },
   renderFakeEmojis: {
@@ -73,6 +112,7 @@ interface CachedSticker {
   id: string;
   name: string;
   format_type: number;
+  guild?: string;
 }
 
 const emojis = new Map<string, Emoji>();
@@ -102,7 +142,7 @@ const addEmojis = (guild: string, list: Phoenix.Emoji[] | undefined) => {
 const addStickers = (list: Phoenix.Sticker[] | undefined) => {
   for (const s of list ?? []) {
     if (!s.id || !s.name) continue;
-    stickers.set(s.id, { id: s.id, name: s.name, format_type: s.format_type });
+    stickers.set(s.id, { id: s.id, name: s.name, format_type: s.format_type, guild: s.guild_id });
   }
 };
 
@@ -322,20 +362,67 @@ const sendChannelId = (path: string) => {
   return match ? match[1] : undefined;
 };
 
+const stickerUsable = (sticker: CachedSticker, guild: string | undefined) =>
+  (!settings.forceFake && (premiumType ?? 1) > 0) || (!!sticker.guild && sticker.guild === guild);
+
+const stickerLink = (sticker: CachedSticker) => {
+  const size = settings.stickerSize;
+  const ext = sticker.format_type === 4 ? "gif" : "png";
+  const name = encodeURIComponent(sticker.name);
+  const animated = sticker.format_type === 2 || sticker.format_type === 4 ? "&animated=true" : "";
+  const url = `https://media.discordapp.net/stickers/${sticker.id}.${ext}?size=${size}&name=${name}${animated}`;
+  if (!settings.useHyperLinks) return url;
+  return `[${settings.hyperLinkText.replaceAll("{{NAME}}", sticker.name)}](${url})`;
+};
+
+type SendBody = { content?: unknown; sticker_ids?: unknown; [key: string]: unknown };
+
+// Moves the stickers the sender cannot post natively out of `sticker_ids` and
+// into the content as CDN links. Returns whether it changed the body.
+const linkStickers = (body: SendBody, guild: string | undefined) => {
+  if (!settings.enableStickerBypass || !Array.isArray(body.sticker_ids) || !body.sticker_ids.length) {
+    return false;
+  }
+  const links: string[] = [];
+  const kept: string[] = [];
+  for (const id of body.sticker_ids as string[]) {
+    const sticker = stickers.get(id);
+    if (!sticker || stickerUsable(sticker, guild)) kept.push(id);
+    else links.push(stickerLink(sticker));
+  }
+  if (!links.length) return false;
+  if (kept.length) body.sticker_ids = kept;
+  else delete body.sticker_ids;
+  const existing = typeof body.content === "string" ? body.content.trim() : "";
+  body.content = existing ? `${existing} ${links.join(" ")}` : links.join(" ");
+  return true;
+};
+
 // Sends and edits the composer hook missed, like a picked emoji the mirror
-// didn't see. Text onSend already rewrote comes through unchanged.
+// didn't see, and stickers. Text onSend already rewrote comes through unchanged.
 const rewriteRequest = (req: Phoenix.InterceptedRequest): Phoenix.RequestHookResult => {
-  if (!req.body.includes(":")) return;
-  const body = req.json<{ content?: unknown }>();
-  if (!body || typeof body.content !== "string" || !body.content.includes(":")) return;
+  if (!req.body.includes(":") && !req.body.includes("sticker_ids")) return;
+  const parsed = req.json<SendBody>();
+  if (!parsed) return;
+  const body = { ...parsed };
   const channelId = sendChannelId(req.path);
-  const result = rewrite(body.content, channelId ? channelGuild.get(channelId) : undefined);
-  if (result === body.content) return;
-  return { body: { ...body, content: result } };
+  const guild = channelId ? channelGuild.get(channelId) : undefined;
+  let changed = linkStickers(body, guild);
+  if (typeof body.content === "string" && body.content.includes(":")) {
+    const result = rewrite(body.content, guild);
+    if (result !== body.content) {
+      body.content = result;
+      changed = true;
+    }
+  }
+  return changed ? { body } : undefined;
 };
 
 phoenix.discord.onRequest({ method: "POST", pathPrefix: "/channels/", pathSuffix: "/messages" }, rewriteRequest);
 phoenix.discord.onRequest({ method: "PATCH", pathPrefix: "/channels/", pathIncludes: "/messages/" }, rewriteRequest);
+
+syncStreamUnlock(settings.enableStreamQualityBypass);
+phoenix.onUnload(() => syncStreamUnlock(false));
 
 // --- Incoming rendering: turn fake Nitro emojis, stickers, and GIFs into real ones ---
 
