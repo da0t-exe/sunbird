@@ -442,6 +442,176 @@ const rewriteRequest = (req: Phoenix.InterceptedRequest): Phoenix.RequestHookRes
 phoenix.discord.onRequest({ method: "POST", pathPrefix: "/channels/", pathSuffix: "/messages" }, rewriteRequest);
 phoenix.discord.onRequest({ method: "PATCH", pathPrefix: "/channels/", pathIncludes: "/messages/" }, rewriteRequest);
 
+// --- Nitro color themes: keep the picked gradient on this client ---
+//
+// Appearance sends the gradient as `client_theme_settings` (field 3) inside
+// the settings proto's appearance message (field 13), and Discord's servers
+// drop it for accounts without Nitro: the PATCH response, and READY's
+// `user_settings_proto` after a restart, come back with only the gradient's
+// base theme. The last gradient sent is kept in storage and put back into
+// both.
+
+const APPEARANCE_FIELD = 13;
+const CLIENT_THEME_FIELD = 3;
+const THEME_KEY = "clientThemeSettings";
+
+const fromBase64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+const toBase64 = (bytes: Uint8Array) => {
+  let text = "";
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+};
+
+interface ProtoField {
+  field: number;
+  wire: number;
+  // The whole field, tag included, and a length-delimited field's payload.
+  start: number;
+  end: number;
+  payload: number;
+}
+
+const readVarint = (bytes: Uint8Array, at: number): [number, number] => {
+  let value = 0;
+  let shift = 0;
+  while (at < bytes.length) {
+    const byte = bytes[at++];
+    value += (byte & 0x7f) * 2 ** shift;
+    if (!(byte & 0x80)) return [value, at];
+    shift += 7;
+  }
+  throw new Error("truncated varint");
+};
+
+const writeVarint = (value: number) => {
+  const out: number[] = [];
+  while (value > 0x7f) {
+    out.push((value % 0x80) | 0x80);
+    value = Math.floor(value / 0x80);
+  }
+  out.push(value);
+  return out;
+};
+
+const parseProto = (bytes: Uint8Array): ProtoField[] => {
+  const fields: ProtoField[] = [];
+  let at = 0;
+  while (at < bytes.length) {
+    const start = at;
+    const [tag, afterTag] = readVarint(bytes, at);
+    const wire = tag % 8;
+    let payload = afterTag;
+    if (wire === 0) [, at] = readVarint(bytes, afterTag);
+    else if (wire === 1) at = afterTag + 8;
+    else if (wire === 5) at = afterTag + 4;
+    else if (wire === 2) {
+      const [len, afterLen] = readVarint(bytes, afterTag);
+      payload = afterLen;
+      at = afterLen + len;
+    } else throw new Error(`unsupported wire type ${wire}`);
+    if (at > bytes.length) throw new Error("truncated field");
+    fields.push({ field: Math.floor(tag / 8), wire, start, end: at, payload });
+  }
+  return fields;
+};
+
+const lengthDelimited = (field: number, payload: Uint8Array) =>
+  Uint8Array.from([...writeVarint(field * 8 + 2), ...writeVarint(payload.length), ...payload]);
+
+const concat = (parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+};
+
+// The appearance message of a settings proto, or undefined without one.
+const appearanceOf = (proto: Uint8Array) => {
+  const field = parseProto(proto).find((f) => f.field === APPEARANCE_FIELD && f.wire === 2);
+  return field ? proto.subarray(field.payload, field.end) : undefined;
+};
+
+// Remembers the gradient a sent settings proto picks, or forgets it when the
+// proto picks a theme without one.
+const rememberTheme = (settingsBase64: string) => {
+  const appearance = appearanceOf(fromBase64(settingsBase64));
+  if (!appearance) return;
+  const fields = parseProto(appearance);
+  const theme = fields.find((f) => f.field === CLIENT_THEME_FIELD && f.wire === 2);
+  // A default theme is sent with an empty `client_theme_settings`.
+  const gradient = theme && appearance.slice(theme.payload, theme.end);
+  if (gradient && gradient.length) {
+    phoenix.storage.set(THEME_KEY, toBase64(gradient));
+  } else if (theme || fields.some((f) => f.field === 1)) {
+    phoenix.storage.delete(THEME_KEY);
+  }
+};
+
+// Puts the kept gradient back into a settings proto that came back without
+// one. Returns the new base64, or undefined when nothing changes.
+const restoreTheme = (settingsBase64: string) => {
+  const saved = phoenix.storage.get<string>(THEME_KEY);
+  if (!saved) return;
+  const proto = fromBase64(settingsBase64);
+  const top = parseProto(proto);
+  const field = top.find((f) => f.field === APPEARANCE_FIELD && f.wire === 2);
+  const appearance = field ? proto.subarray(field.payload, field.end) : new Uint8Array();
+  const inner = parseProto(appearance);
+  if (inner.some((f) => f.field === CLIENT_THEME_FIELD)) return;
+  const patched = lengthDelimited(
+    APPEARANCE_FIELD,
+    concat([appearance, lengthDelimited(CLIENT_THEME_FIELD, fromBase64(saved))]),
+  );
+  const parts = field
+    ? [proto.subarray(0, field.start), patched, proto.subarray(field.end)]
+    : [proto, patched];
+  return toBase64(concat(parts));
+};
+
+const SETTINGS_PROTO = { pathPrefix: "/users/@me/settings-proto/1" };
+
+phoenix.discord.onRequest({ method: "PATCH", ...SETTINGS_PROTO }, (req) => {
+  if (!settings.enableAppearanceBypass) return;
+  try {
+    const body = req.json<{ settings?: string }>();
+    if (body?.settings) rememberTheme(body.settings);
+  } catch (err) {
+    phoenix.log.warn(`reading the sent theme: ${err}`);
+  }
+});
+
+const restoreResponse = (res: Phoenix.InterceptedResponse) => {
+  if (!settings.enableAppearanceBypass || res.status < 200 || res.status >= 300) return;
+  try {
+    const body = res.json<{ settings?: string }>();
+    const restored = body?.settings && restoreTheme(body.settings);
+    return restored ? { body: { ...body, settings: restored } } : undefined;
+  } catch (err) {
+    phoenix.log.warn(`restoring the theme: ${err}`);
+  }
+};
+phoenix.discord.onResponse({ method: "PATCH", ...SETTINGS_PROTO }, restoreResponse);
+phoenix.discord.onResponse({ method: "GET", ...SETTINGS_PROTO }, restoreResponse);
+
+if (gateway.ready) {
+  phoenix.hook(gateway.ready, {
+    before(ready) {
+      if (!settings.enableAppearanceBypass) return;
+      const payload = ready as { user_settings_proto?: string };
+      if (!payload.user_settings_proto) return;
+      try {
+        const restored = restoreTheme(payload.user_settings_proto);
+        if (restored) payload.user_settings_proto = restored;
+      } catch (err) {
+        phoenix.log.warn(`restoring the theme at READY: ${err}`);
+      }
+    },
+  });
+}
+
 syncStreamUnlock(settings.enableStreamQualityBypass);
 syncAppearanceUnlock(settings.enableAppearanceBypass);
 phoenix.onUnload(() => {
