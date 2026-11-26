@@ -104,16 +104,20 @@ impl Prologue {
 #[derive(Clone, Copy)]
 pub struct Prologues {
    /// `MessageRow::render`, `build_message_body` and `MessageContextMenu`.
-   pub row:         Prologue,
+   pub row:            Prologue,
    /// `host::section`, `Workspace::render_overlays`, `Store::delete_message`
    /// and `ReqwestTransport::send`.
-   pub frame:       Prologue,
-   pub media_fetch: Prologue,
+   pub frame:          Prologue,
+   pub media_fetch:    Prologue,
    /// The asset loader, [`asset_load`].
-   pub asset_load:  Prologue,
+   pub asset_load:     Prologue,
    /// `getEmojiUnavailableReason`, a leaf: its first four instructions on
    /// Win64, five on System V, up to the `jne`.
-   pub emoji_check: Prologue,
+   pub emoji_check:    Prologue,
+   /// `meetsApplicationStreamRequirements`, a leaf checking stream resolution
+   /// and FPS against Nitro and boost tiers. Its System V entry has not been
+   /// measured, and the hook stays off where there is no prologue.
+   pub stream_quality: Option<Prologue>,
 }
 
 impl Prologues {
@@ -128,42 +132,47 @@ impl Prologues {
       match abi {
          Abi::Win64 => {
             Self {
-               row:         Prologue {
+               row:            Prologue {
                   pattern: ROW_PROLOGUE,
                   len:     ROW_PROLOGUE_LEN,
                },
-               frame:       Prologue {
+               frame:          Prologue {
                   pattern: FRAME_PROLOGUE,
                   len:     FRAME_PROLOGUE_LEN,
                },
-               media_fetch: Prologue {
+               media_fetch:    Prologue {
                   pattern: MEDIA_FETCH_PROLOGUE,
                   len:     MEDIA_FETCH_PROLOGUE_LEN,
                },
-               asset_load:  Prologue {
+               asset_load:     Prologue {
                   pattern: MEDIA_FETCH_PROLOGUE,
                   len:     MEDIA_FETCH_PROLOGUE_LEN,
                },
-               emoji_check: Prologue {
+               emoji_check:    Prologue {
                   pattern: Pattern::new("44 0F B6 ?? ?? B0 03 45 89 ?? 41 83 ?? 02"),
                   len:     14,
                },
+               stream_quality: Some(Prologue {
+                  pattern: Pattern::new("56 57 55 53 44 8B 54 24 ?? 44 8B 5C 24 ??"),
+                  len:     14,
+               }),
             }
          },
          Abi::SysV => {
             Self {
-               row:         SYSV_FRAME,
-               frame:       SYSV_FRAME,
-               media_fetch: SYSV_FRAME,
+               row:            SYSV_FRAME,
+               frame:          SYSV_FRAME,
+               media_fetch:    SYSV_FRAME,
                // Four pushes and `sub rsp, imm32`.
-               asset_load:  Prologue {
+               asset_load:     Prologue {
                   pattern: Pattern::new("41 57 41 56 41 54 53 48 81 EC ?? ?? ?? ??"),
                   len:     14,
                },
-               emoji_check: Prologue {
+               emoji_check:    Prologue {
                   pattern: Pattern::new("0F B6 ?? ?? B0 03 89 ?? 83 ?? 02 83 ?? 0E"),
                   len:     14,
                },
+               stream_quality: None,
             }
          },
       }
@@ -1092,6 +1101,36 @@ pub fn entry_prologue(image: &Image<'_>, func: usize) -> Found<Prologue> {
       return Ok(Prologue { pattern, len });
    }
    Err(format!("{func:#x} opens with less than a jump's bytes"))
+}
+
+/// Phoenix's Go Live stream quality check:
+/// `bool f(&User, has_guild, guild_tier, preset, resolution, fps)`.
+///
+/// Found from the static 18-entry `ApplicationStreamSettingRequirements` table
+/// (starting with Source at 60, 30, and 15 FPS, each requiring full Nitro). The
+/// check loads the table in each of its Nitro and guild branches.
+pub fn stream_quality(image: &Image<'_>) -> Found<usize> {
+   const TABLE_HEAD: [u8; 48] = [
+      0x00, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x1E, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x01, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x01, 0x00,
+      0x00, 0x00, 0x00,
+   ];
+   let tables = image.find_bytes(&TABLE_HEAD);
+   let mut counts: HashMap<usize, usize> = HashMap::new();
+   for sites in lea_refs_many(image, &tables).into_values() {
+      for site in sites {
+         if let Some((func, _)) = image.function_bounds(site) {
+            *counts.entry(func).or_default() += 1;
+         }
+      }
+   }
+   let candidates: Vec<usize> = counts
+      .into_iter()
+      .filter(|&(_, count)| count >= 2)
+      .map(|(func, _)| func)
+      .collect();
+   one("stream quality check", &candidates)
 }
 
 /// Settings page 24's sidebar name, `Phoenix`, and the `PHOENIX` that ends
