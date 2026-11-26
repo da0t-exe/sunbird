@@ -37,6 +37,7 @@ use crate::{
    shortcuts,
    sidebar,
    toolbar,
+   stream,
 };
 
 /// What plugins registered with the desktop UI, kept in the runtime's userdata
@@ -71,6 +72,8 @@ pub struct Desktop<'js> {
    /// `phoenix.ui.hideCount` holds by id and plugin.
    #[cfg(target_arch = "x86_64")]
    pub hidden_counts:  RefCell<Vec<(u64, String, Count)>>,
+   /// `phoenix.stream.unlockQuality` handles by id and plugin.
+   pub stream_unlocks: RefCell<Vec<(u64, String)>>,
 }
 
 impl<'js> Desktop<'js> {
@@ -192,4 +195,7 @@ pub fn unload(ctx: &Ctx<'_>, name: &str) {
    }
 
    themes::unload(name);
+   let mut stream_unlocks = registry.stream_unlocks.borrow_mut();
+   stream_unlocks.retain(|(_, plugin)| plugin != name);
+   stream::unlock(!stream_unlocks.is_empty());
 }

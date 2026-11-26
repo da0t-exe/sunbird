@@ -37,6 +37,7 @@ mod sidebar;
 mod staff;
 mod theme_css;
 mod toolbar;
+mod stream;
 
 use std::{
    ffi::c_void,
@@ -231,6 +232,7 @@ pub fn prepare() -> Result<(), Error> {
    emoji::install(&image);
    #[cfg(windows)]
    gpui_theme::install(&image);
+   stream::install(&image);
    <os::Os as os::DesktopOs>::install(&image);
    let registry = phoenix_runtime::hook(&image);
    if registry.is_ok() {

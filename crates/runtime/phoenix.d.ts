@@ -1020,6 +1020,7 @@ declare namespace Phoenix {
     /// just before the next gateway event it handles, usually well under a second later.
     enqueue<P>(sig: Sig<P>, payload: Partial<P>): void;
     readonly messages: Messages;
+    readonly stream: Stream;
     readonly ui: Ui;
     readonly commands: Commands;
     readonly log: Log;
@@ -1196,6 +1197,13 @@ declare namespace Phoenix {
     /// Reactions and the rest keep the lock, and nothing else about Nitro changes. Desktop has no
     /// picker presses to report: the handler is never called there, only the unlock applies.
     onEmojiPick(handler: (emojiId: string, ctx: UiContext) => string | void): Remover;
+  }
+
+  interface Stream {
+    /// Unlocks Go Live resolutions and framerates normally gated behind Nitro or server boost
+    /// tiers (1080p, 1440p, Source, 60 FPS) on Desktop Phoenix while the handle is active.
+    /// No-op on mobile.
+    unlockQuality(): Remover;
   }
 
   /// `channelId` is the open channel, `reply` posts a local message there.
