@@ -45,22 +45,22 @@ use crate::{
 #[derive(Default)]
 pub struct Desktop<'js> {
    /// `phoenix.ui.addMessageAccessory` callbacks.
-   pub accessories:    RefCell<Vec<DesktopAccessory<'js>>>,
+   pub accessories:        RefCell<Vec<DesktopAccessory<'js>>>,
    /// `phoenix.ui.addMemberDecoration` callbacks.
-   pub members:        RefCell<Vec<DesktopMember<'js>>>,
+   pub members:            RefCell<Vec<DesktopMember<'js>>>,
    /// `phoenix.ui.addMessageHeaderDecoration` callbacks.
-   pub headers:        RefCell<Vec<DesktopMember<'js>>>,
+   pub headers:            RefCell<Vec<DesktopMember<'js>>>,
    /// `phoenix.ui.addMessageAction` callbacks.
-   pub actions:        RefCell<Vec<DesktopAction<'js>>>,
+   pub actions:            RefCell<Vec<DesktopAction<'js>>>,
    /// Active `phoenix.ui.openPage` button callbacks, keyed by button ID.
    pub page_buttons:   RefCell<HashMap<u64, (u64, String, Function<'js>)>>,
    /// `phoenix.ui.notify` `onPress` callbacks, keyed by banner ID.
    pub notices:        RefCell<HashMap<u64, (String, Function<'js>)>>,
    /// `phoenix.messages.onEmojiPick` handlers by id and plugin. Desktop has
    /// no picker presses to give them, only the unlock they turn on.
-   pub emoji_pickers:  RefCell<Vec<(u64, String)>>,
+   pub emoji_pickers:      RefCell<Vec<(u64, String)>>,
    /// `phoenix.ui.onEvent("rowDoubleTap")` handlers by id and plugin.
-   pub double_taps:    RefCell<Vec<(u64, String, Function<'js>)>>,
+   pub double_taps:        RefCell<Vec<(u64, String, Function<'js>)>>,
    /// `phoenix.ui.hide` holds by id and plugin.
    pub hides:          RefCell<Vec<(u64, String)>>,
    /// `phoenix.ui.collapseChannels` holds by id and plugin.
@@ -73,7 +73,9 @@ pub struct Desktop<'js> {
    #[cfg(target_arch = "x86_64")]
    pub hidden_counts:  RefCell<Vec<(u64, String, Count)>>,
    /// `phoenix.stream.unlockQuality` handles by id and plugin.
-   pub stream_unlocks: RefCell<Vec<(u64, String)>>,
+   pub stream_unlocks:     RefCell<Vec<(u64, String)>>,
+   /// `phoenix.appearance.unlockNitro` handles by id and plugin.
+   pub appearance_unlocks: RefCell<Vec<(u64, String)>>,
 }
 
 impl<'js> Desktop<'js> {
@@ -198,4 +200,9 @@ pub fn unload(ctx: &Ctx<'_>, name: &str) {
    let mut stream_unlocks = registry.stream_unlocks.borrow_mut();
    stream_unlocks.retain(|(_, plugin)| plugin != name);
    stream::unlock(!stream_unlocks.is_empty());
+   drop(stream_unlocks);
+
+   let mut appearance_unlocks = registry.appearance_unlocks.borrow_mut();
+   appearance_unlocks.retain(|(_, plugin)| plugin != name);
+   stream::unlock_appearance(!appearance_unlocks.is_empty());
 }
