@@ -1,10 +1,11 @@
-// @description Unlocks Nitro stream quality, sends custom emojis and stickers as links, and renders fake emojis, stickers, and GIFs as real ones
-// @version 0.5.0
+// @description Unlocks Nitro stream quality, themes and app icons, sends custom emojis and stickers as links, and renders fake emojis, stickers, and GIFs as real ones
+// @version 0.6.0
 // @author mantikafasi
 
 const { gateway } = phoenix;
 
 let removeStreamUnlock: Phoenix.Remover | null = null;
+let removeAppearanceUnlock: Phoenix.Remover | null = null;
 
 const syncStreamUnlock = (enabled: boolean) => {
   if (enabled) {
@@ -17,6 +18,17 @@ const syncStreamUnlock = (enabled: boolean) => {
   }
 };
 
+const syncAppearanceUnlock = (enabled: boolean) => {
+  if (enabled) {
+    if (!removeAppearanceUnlock && phoenix.appearance?.unlockNitro) {
+      removeAppearanceUnlock = phoenix.appearance.unlockNitro();
+    }
+  } else if (removeAppearanceUnlock) {
+    removeAppearanceUnlock();
+    removeAppearanceUnlock = null;
+  }
+};
+
 const settings = phoenix.settings.define({
   enableStreamQualityBypass: {
     type: "switch",
@@ -25,6 +37,15 @@ const settings = phoenix.settings.define({
     default: true,
     onChange(enabled) {
       syncStreamUnlock(enabled);
+    },
+  },
+  enableAppearanceBypass: {
+    type: "switch",
+    title: "Unlock Nitro themes and app icons",
+    description: "Allow Nitro color themes and app icons in Settings, Appearance, on this device (Desktop)",
+    default: true,
+    onChange(enabled) {
+      syncAppearanceUnlock(enabled);
     },
   },
   enableStickerBypass: {
@@ -422,7 +443,11 @@ phoenix.discord.onRequest({ method: "POST", pathPrefix: "/channels/", pathSuffix
 phoenix.discord.onRequest({ method: "PATCH", pathPrefix: "/channels/", pathIncludes: "/messages/" }, rewriteRequest);
 
 syncStreamUnlock(settings.enableStreamQualityBypass);
-phoenix.onUnload(() => syncStreamUnlock(false));
+syncAppearanceUnlock(settings.enableAppearanceBypass);
+phoenix.onUnload(() => {
+  syncStreamUnlock(false);
+  syncAppearanceUnlock(false);
+});
 
 // --- Incoming rendering: turn fake Nitro emojis, stickers, and GIFs into real ones ---
 
