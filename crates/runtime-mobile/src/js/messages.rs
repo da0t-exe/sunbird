@@ -174,6 +174,18 @@ pub fn patch_api<'js>(
          move |ctx: Ctx<'js>, function: Function<'js>| on_emoji_pick(&ctx, &name, function),
       )?,
    )?;
+   let stream = Object::new(ctx.clone())?;
+   stream.set(
+      "unlockQuality",
+      Function::new(ctx.clone(), |ctx: Ctx<'js>| Function::new(ctx, || {}))?,
+   )?;
+   api.set("stream", stream)?;
+   let appearance = Object::new(ctx.clone())?;
+   appearance.set(
+      "unlockNitro",
+      Function::new(ctx.clone(), |ctx: Ctx<'js>| Function::new(ctx, || {}))?,
+   )?;
+   api.set("appearance", appearance)?;
    api.set("ui", ui_object(ctx, plugin, permissions.ui_tree())?)?;
    api.set("commands", commands_object(ctx, plugin)?)
 }
