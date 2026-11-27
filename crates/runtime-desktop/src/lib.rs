@@ -36,6 +36,7 @@ mod settings;
 mod shortcuts;
 mod sidebar;
 mod staff;
+mod stream;
 mod theme_css;
 mod toolbar;
 
@@ -238,6 +239,7 @@ pub fn prepare() -> Result<(), Error> {
    emoji::install(&image, &ix);
    #[cfg(windows)]
    gpui_theme::install(&image);
+   stream::install(&image);
    <os::Os as os::DesktopOs>::install(&image);
    let registry = phoenix_runtime::hook(&image);
    if registry.is_ok() {
