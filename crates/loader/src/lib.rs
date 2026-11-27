@@ -48,14 +48,34 @@ pub unsafe extern "system" fn DllMain(
    #[link(name = "kernel32")]
    unsafe extern "system" {
       fn DisableThreadLibraryCalls(module: *mut std::ffi::c_void) -> i32;
+      fn GetCurrentThread() -> *mut std::ffi::c_void;
+      fn QueueUserAPC(
+         function: unsafe extern "system" fn(usize),
+         thread: *mut std::ffi::c_void,
+         data: usize,
+      ) -> u32;
    }
 
    if reason == DLL_PROCESS_ATTACH {
       // SAFETY: `module` is the HINSTANCE handed to DllMain.
       unsafe { DisableThreadLibraryCalls(module) };
-      desktop();
+      // The injector loads this library from an APC on Discord's suspended main
+      // thread. A second APC queued on that thread runs as soon as the load
+      // returns, still before Discord's entry point but outside the loader
+      // lock, where the locators' index can start its threads (joining them
+      // under the lock hangs Discord before its first window).
+      // SAFETY: the pseudo handle names this thread, and `desktop_apc` takes
+      // the one pointer-sized argument an APC passes.
+      if unsafe { QueueUserAPC(desktop_apc, GetCurrentThread(), 0) } == 0 {
+         desktop();
+      }
    }
    1
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn desktop_apc(_data: usize) {
+   desktop();
 }
 
 #[cfg(unix)]
