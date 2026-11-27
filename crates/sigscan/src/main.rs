@@ -49,7 +49,8 @@ use phoenix_sigs::{
 };
 
 const USAGE: &str = "usage: sigscan <library.so | Discord.exe | Discord | PhoenixFatClient | \
-                     main.jsbundle> [check | strings <text> | refs <addr> | dis <addr> [count]]";
+                     main.jsbundle> \
+                     [check | strings <text> | refs <addr> | dis <addr> [count]]";
 
 fn main() -> misstep::Result<()> {
    misstep::install_panic_hook();
@@ -200,7 +201,10 @@ fn check(image: &Image<'_>, machine: Machine, macho: bool) -> misstep::Result<()
          );
          report("settings layer", desktop::settings_layer(image).map(at));
          report("access gate", desktop::access_gate(image).map(at));
-         report("notification gate", desktop::notification_gate(image).map(at));
+         report(
+            "notification gate",
+            desktop::notification_gate(image).map(at),
+         );
          if abi == x86::Abi::SysV {
             report(
                "wayland frame",
@@ -499,31 +503,35 @@ fn check(image: &Image<'_>, machine: Machine, macho: bool) -> misstep::Result<()
                   .ok_or_else(|| "prologue changed".to_owned())
             }),
          );
-         report(
-            "premium feature",
-            desktop::premium_feature(image).and_then(|found| {
-               prologues
-                  .premium_feature
-                  .is_none_or(|prologue| prologue.at(image, found.func))
-                  .then(|| {
-                     let appearance = found.app_icons.map_or_else(
-                        || "app_icons=off (tier lists changed)".to_owned(),
-                        |id| format!("app_icons={id:#x}"),
-                     );
-                     format!(
-                        "{} stream_high={:#x} {appearance}",
-                        at(found.func),
-                        found.stream_high
-                     )
-                  })
-                  .ok_or_else(|| "prologue changed".to_owned())
-            }),
-         );
-         report(
-            "theme perk",
-            desktop::theme_perk(image)
-               .map(|perk| format!("{} field +{:#x}", at(perk.accessor), perk.field)),
-         );
+         // Only Win64's entries are measured, and the runtime leaves both off
+         // elsewhere.
+         if abi == x86::Abi::Win64 {
+            report(
+               "premium feature",
+               desktop::premium_feature(image).and_then(|found| {
+                  prologues
+                     .premium_feature
+                     .is_none_or(|prologue| prologue.at(image, found.func))
+                     .then(|| {
+                        let app_icons = found.app_icons.map_or_else(
+                           || "app_icons=off (tier lists changed)".to_owned(),
+                           |id| format!("app_icons={id:#x}"),
+                        );
+                        format!(
+                           "{} stream_high={:#x} {app_icons}",
+                           at(found.func),
+                           found.stream_high
+                        )
+                     })
+                     .ok_or_else(|| "prologue changed".to_owned())
+               }),
+            );
+            report(
+               "theme perk",
+               desktop::theme_perk(image)
+                  .map(|perk| format!("{} field +{:#x}", at(perk.accessor), perk.field)),
+            );
+         }
          report(
             "message json",
             json

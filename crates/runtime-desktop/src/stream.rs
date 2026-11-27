@@ -67,7 +67,15 @@ fn force_plugin(bits: u32, on: bool) {
 
 /// Hooks the checks from [`crate::prepare`], before Discord's threads run.
 pub fn install(image: &Image<'static>) {
+   // Every locator here decodes x86-64, and macOS runs arm64.
+   if !cfg!(target_arch = "x86_64") {
+      return;
+   }
    install_quality(image);
+   // Only Win64's leaves are measured, so System V keeps these locks quietly.
+   if Abi::of(image) != Abi::Win64 {
+      return;
+   }
    install_feature(image);
    install_theme_perk(image);
 }

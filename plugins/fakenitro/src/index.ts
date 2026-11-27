@@ -455,11 +455,35 @@ const APPEARANCE_FIELD = 13;
 const CLIENT_THEME_FIELD = 3;
 const THEME_KEY = "clientThemeSettings";
 
-const fromBase64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+// Plugins type-check against ES2023 alone, without the DOM's atob and btoa.
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+const fromBase64 = (text: string) => {
+  const clean = text.replace(/[^A-Za-z0-9+/]/g, "");
+  const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let bits = 0;
+  let value = 0;
+  let at = 0;
+  for (const char of clean) {
+    value = ((value << 6) | BASE64.indexOf(char)) & 0xffffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[at++] = (value >> bits) & 0xff;
+    }
+  }
+  return out.subarray(0, at);
+};
+
 const toBase64 = (bytes: Uint8Array) => {
   let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
-  return btoa(text);
+  for (let i = 0; i < bytes.length; i += 3) {
+    const chunk = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    text += BASE64[(chunk >> 18) & 63] + BASE64[(chunk >> 12) & 63];
+    text += i + 1 < bytes.length ? BASE64[(chunk >> 6) & 63] : "=";
+    text += i + 2 < bytes.length ? BASE64[chunk & 63] : "=";
+  }
+  return text;
 };
 
 interface ProtoField {
@@ -560,10 +584,15 @@ const restoreTheme = (settingsBase64: string) => {
   const field = top.find((f) => f.field === APPEARANCE_FIELD && f.wire === 2);
   const appearance = field ? proto.subarray(field.payload, field.end) : new Uint8Array();
   const inner = parseProto(appearance);
-  if (inner.some((f) => f.field === CLIENT_THEME_FIELD)) return;
+  const theme = inner.find((f) => f.field === CLIENT_THEME_FIELD);
+  if (theme && theme.end > theme.payload) return;
+  // An empty `client_theme_settings` is dropped and replaced with the kept one.
+  const kept = theme
+    ? concat([appearance.subarray(0, theme.start), appearance.subarray(theme.end)])
+    : appearance;
   const patched = lengthDelimited(
     APPEARANCE_FIELD,
-    concat([appearance, lengthDelimited(CLIENT_THEME_FIELD, fromBase64(saved))]),
+    concat([kept, lengthDelimited(CLIENT_THEME_FIELD, fromBase64(saved))]),
   );
   const parts = field
     ? [proto.subarray(0, field.start), patched, proto.subarray(field.end)]

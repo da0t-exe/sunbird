@@ -1177,11 +1177,11 @@ const MEASURED_APP_ICONS: u8 = 0x17;
 /// The tier lists the check loads, each as `mov edx, len; lea r8, [list]`.
 fn tier_lists(image: &Image<'_>, func: usize) -> Vec<Vec<u8>> {
    const BODY: usize = 0x120;
-   let load = Pattern::new("BA ?? 00 00 00 4C 8D 05 ?? ?? ?? ??");
+   const LOAD: Pattern = Pattern::new("BA ?? 00 00 00 4C 8D 05 ?? ?? ?? ??");
    let Some(body) = image.read(func, BODY) else {
       return Vec::new();
    };
-   load
+   LOAD
       .find_in(body)
       .into_iter()
       .filter_map(|at| {
@@ -1200,6 +1200,7 @@ fn tier_lists(image: &Image<'_>, func: usize) -> Vec<Vec<u8>> {
 /// opens with a call to a gate doing `mov dl, feature; call`.
 pub fn premium_feature(image: &Image<'_>) -> Found<PremiumFeature> {
    const BACK: usize = 0x100;
+   const GATE: Pattern = Pattern::new("B2 ?? E8");
    if Abi::of(image) != Abi::Win64 {
       return Err("the stream feature gate is only decoded on Win64".to_owned());
    }
@@ -1233,12 +1234,11 @@ pub fn premium_feature(image: &Image<'_>) -> Found<PremiumFeature> {
          .filter_map(|site| Some(image.function_bounds(site)?.0))
          .collect();
    let banner = one("HD stream banner", &banners.into_iter().collect::<Vec<_>>())?;
-   let gate = Pattern::new("B2 ?? E8");
    let features: Vec<u8> = calls_in(image, banner, 0x60)
       .into_iter()
       .filter_map(|(_, callee)| {
          let body = image.read(callee, 0x30)?;
-         let at = *gate.find_in(body).first()?;
+         let at = *GATE.find_in(body).first()?;
          Some(body[at + 1])
       })
       .collect();
@@ -1274,6 +1274,7 @@ pub struct ThemePerk {
 /// The perks hold the tier's upload limit and its booleans, built from the
 /// tier, not from `canUsePremiumFeature`.
 pub fn theme_perk(image: &Image<'_>) -> Found<ThemePerk> {
+   const LOAD: Pattern = Pattern::new("E8 ?? ?? ?? ?? 44 8A 73 ??");
    if Abi::of(image) != Abi::Win64 {
       return Err("the theme perk is only decoded on Win64".to_owned());
    }
@@ -1283,12 +1284,11 @@ pub fn theme_perk(image: &Image<'_>) -> Found<ThemePerk> {
          .flatten()
          .filter_map(|site| Some(image.function_bounds(site)?.0))
          .collect();
-   let load = Pattern::new("E8 ?? ?? ?? ?? 44 8A 73 ??");
    let found: Vec<(usize, u8)> = sections
       .into_iter()
       .filter_map(|section| {
          let head = image.read(section, 0xC0)?;
-         let at = *load.find_in(head).first()?;
+         let at = *LOAD.find_in(head).first()?;
          let accessor = rel32_target(image, section + at + 1)?;
          Some((accessor, head[at + 8]))
       })
