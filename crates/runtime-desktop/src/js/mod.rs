@@ -36,8 +36,8 @@ use crate::{
    members::Place,
    shortcuts,
    sidebar,
-   toolbar,
    stream,
+   toolbar,
 };
 
 /// What plugins registered with the desktop UI, kept in the runtime's userdata
@@ -53,25 +53,25 @@ pub struct Desktop<'js> {
    /// `phoenix.ui.addMessageAction` callbacks.
    pub actions:            RefCell<Vec<DesktopAction<'js>>>,
    /// Active `phoenix.ui.openPage` button callbacks, keyed by button ID.
-   pub page_buttons:   RefCell<HashMap<u64, (u64, String, Function<'js>)>>,
+   pub page_buttons:       RefCell<HashMap<u64, (u64, String, Function<'js>)>>,
    /// `phoenix.ui.notify` `onPress` callbacks, keyed by banner ID.
-   pub notices:        RefCell<HashMap<u64, (String, Function<'js>)>>,
+   pub notices:            RefCell<HashMap<u64, (String, Function<'js>)>>,
    /// `phoenix.messages.onEmojiPick` handlers by id and plugin. Desktop has
    /// no picker presses to give them, only the unlock they turn on.
    pub emoji_pickers:      RefCell<Vec<(u64, String)>>,
    /// `phoenix.ui.onEvent("rowDoubleTap")` handlers by id and plugin.
    pub double_taps:        RefCell<Vec<(u64, String, Function<'js>)>>,
    /// `phoenix.ui.hide` holds by id and plugin.
-   pub hides:          RefCell<Vec<(u64, String)>>,
+   pub hides:              RefCell<Vec<(u64, String)>>,
    /// `phoenix.ui.collapseChannels` holds by id and plugin.
-   pub collapses:      RefCell<Vec<(u64, String)>>,
+   pub collapses:          RefCell<Vec<(u64, String)>>,
    /// `phoenix.ui.addHeaderButton` handlers by id and plugin.
-   pub header_buttons: RefCell<Vec<(u64, String, Function<'js>)>>,
+   pub header_buttons:     RefCell<Vec<(u64, String, Function<'js>)>>,
    /// `phoenix.ui.addShortcut` handlers by id and plugin.
-   pub shortcuts:      RefCell<Vec<(u64, String, Shortcut, Function<'js>)>>,
+   pub shortcuts:          RefCell<Vec<(u64, String, Shortcut, Function<'js>)>>,
    /// `phoenix.ui.hideCount` holds by id and plugin.
    #[cfg(target_arch = "x86_64")]
-   pub hidden_counts:  RefCell<Vec<(u64, String, Count)>>,
+   pub hidden_counts:      RefCell<Vec<(u64, String, Count)>>,
    /// `phoenix.stream.unlockQuality` handles by id and plugin.
    pub stream_unlocks:     RefCell<Vec<(u64, String)>>,
    /// `phoenix.appearance.unlockNitro` handles by id and plugin.

@@ -81,8 +81,8 @@ use crate::{
    },
    shortcuts,
    sidebar,
-   toolbar,
    stream,
+   toolbar,
 };
 
 #[derive(Clone)]

@@ -35,9 +35,9 @@ mod settings;
 mod shortcuts;
 mod sidebar;
 mod staff;
+mod stream;
 mod theme_css;
 mod toolbar;
-mod stream;
 
 use std::{
    ffi::c_void,
