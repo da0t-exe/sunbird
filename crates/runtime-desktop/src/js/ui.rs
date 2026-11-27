@@ -1501,6 +1501,7 @@ pub fn desktop_patch_api<'js>(
          unlock_stream_quality(&ctx, &name)
       })?,
    )?;
+   stream_obj.set("native", stream::quality_hooked())?;
    api.set("stream", stream_obj)?;
    let appearance = Object::new(ctx.clone())?;
    let name = plugin.to_owned();
@@ -1510,6 +1511,7 @@ pub fn desktop_patch_api<'js>(
          unlock_appearance(&ctx, &name)
       })?,
    )?;
+   appearance.set("native", stream::appearance_hooked())?;
    api.set("appearance", appearance)?;
    api.set("ui", desktop_ui_object(ctx, plugin)?)
 }
